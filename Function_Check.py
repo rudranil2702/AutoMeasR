@@ -64,8 +64,8 @@ def Set_Freq(Freq, Rx):
     Send_Cmd(Rx, ":CALC:MARK3 ON")
     
 def Get_Peak_Value(mxe_rxr):
-    #mxe_rxr.write(":CALC:MARK:AVER")
-    mxe_rxr.write(":CALC:MARK2:Y?")
+    mxe_rxr.write(":CALC:MARK3:MAXH")
+    mxe_rxr.write(":CALC:MARK3:Y?")
     response = mxe_rxr.read()
     amp = float(response)
     return amp
@@ -131,13 +131,17 @@ def find_max_ht_peak(data_dict_ht):
     return max_peak_value, max_peak_height
 
 def linearize_curve(peak_values, reference_values):
-    linearized_values = peak_values-reference_values
-    return linearized_values
+     linearized_values = np.array(peak_values)-np.array(reference_values)
+     return linearized_values
+
+def zero_curve(peak_values, reference_values):
+    zero_values = np.array(peak_values)-np.array(peak_values)
+    return zero_values
 
 def start_processing(FC_File_Name):
     #file_name = entry_file.get()
-    rx_address = input("Enter the Receiver address: ")
-    ac_address = input("Enter the Antenna Controller GPIB address: ")
+    rx_address = "USB0::0x2A8D::0x0F0B::MY59050129::0::INSTR"
+    ac_address = "GPIB1::7::INSTR"
     frequencies = Read_From_Excel(FC_File_Name)
     mxe_rxr = Initialize_Rx(rx_address)
     ac = Initialize_AC(ac_address)
@@ -145,30 +149,32 @@ def start_processing(FC_File_Name):
     peak_values = []
     for frequency in frequencies:
         Set_Freq(frequency, mxe_rxr)
-        Ht_Scan_With_Peak(ac)
+        Ht_Scan_With_Peak(ac, mxe_rxr,frequency)#Ht_Scan_With_Peak(AC, Rx, freq)
         #mxe_rxr.write(":CALC:MARK:MAX:STAT ON")
         # Perform a single measurement using Max Hold
         peak_value = Get_Peak_Value(mxe_rxr)
         # Disable Max Hold feature
         #mxe_rxr.write(":CALC:MARK:MAX:STAT OFF")
         peak_values.append(peak_value)
-
+        time.sleep(2)
     Write_Peak_Values_to_Excel(FC_File_Name, frequencies, peak_values)
     reference_values = Read_Reference_Values(FC_File_Name)
-    linearized_reference_values = linearize_curve(reference_values)
-    linearized_peak_values = linearize_curve(peak_values)
+    linearized_values = linearize_curve(peak_values, reference_values)
+    zero_values = zero_curve(peak_values, reference_values)
+    #linearized_peak_values = linearize_curve(peak_values)
     ac.close()
     mxe_rxr.close()
 ####################################################################################################################################################
     upper_limit = np.mean(np.array(reference_values)) + 3
     lower_limit = np.mean(np.array(reference_values)) - 3
-    linearized_upper_limit = np.array(linearized_reference_values) + 3
-    linearized_lower_limit = np.array(linearized_reference_values) - 3
+    
+    linearized_upper_limit = np.array(zero_values) + 3
+    linearized_lower_limit = np.array(zero_values) - 3
 
     #label_status.config(text="Processing completed!")
 
-    plt.semilogx(frequencies, linearized_peak_values, marker='.', linestyle='-', color='navy', label='Peak Values', linewidth=2)
-    plt.semilogx(frequencies, linearized_reference_values, marker='.', linestyle='-', color='green', label='Reference Values', linewidth=2)
+    plt.semilogx(frequencies, linearized_values, marker='.', linestyle='-', color='navy', label='Peak Values', linewidth=2)
+    #plt.semilogx(frequencies, linearized_reference_values, marker='.', linestyle='-', color='green', label='Reference Values', linewidth=2)
     plt.semilogx(frequencies, linearized_upper_limit, linestyle='--', color='maroon', label='Limit Line at +/-3dB', linewidth=1)
     plt.semilogx(frequencies, linearized_lower_limit, linestyle='--', color='maroon', linewidth=1)
     plt.xlabel('Frequency [MHz]')
@@ -178,8 +184,8 @@ def start_processing(FC_File_Name):
 
     plt.semilogx(frequencies, peak_values, marker='.', linestyle='-', color='navy', label='Peak Values', linewidth=2)
     plt.semilogx(frequencies, reference_values, marker='.', linestyle='-', color='green', label='Reference Values', linewidth=2)
-    plt.semilogx(frequencies, upper_limit, linestyle='--', color='maroon', label='Limit Line at +/-3dB', linewidth=1)
-    plt.semilogx(frequencies, lower_limit, linestyle='--', color='maroon', linewidth=1)
+    plt.semilogx(frequencies, linearized_upper_limit, linestyle='--', color='maroon', label='Limit Line at +/-3dB', linewidth=1)
+    plt.semilogx(frequencies, linearized_lower_limit, linestyle='--', color='maroon', linewidth=1)
     plt.xlabel('Frequency [MHz]')
     plt.ylabel('Peak Values [dBuV]')
     plt.legend()

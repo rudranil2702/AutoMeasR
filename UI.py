@@ -114,7 +114,7 @@ def go_to_angle():
     AC_Addr = ac_address_entry.get()  # Update with the actual address of the Antenna Controller
     AC = AnCt.Initialize_AC(AC_Addr)
     angle = float(angle_entry.get())
-    Send_Cmd(AC, "LD DS1 DV")
+    Send_Cmd(AC, "LD DT1 DV")
     Send_Cmd(AC, f"LD {angle} DG NP GO")
 # Create a button to trigger "Go to Angle"
 go_angle_button = tk.Button(angle_go_frame, text="Go", command=go_to_angle)
@@ -170,12 +170,15 @@ entry_file.pack(side=tk.LEFT, padx=5)
 def Browse_FC_File():
     FC_File_Name = fd.askopenfilename(filetypes=[("Excel Files", "*.xlsx;*.xlsm")])
     if FC_File_Name:
-        angle_file_entry.delete(0, tk.END)
-        angle_file_entry.insert(0, FC_File_Name)
+        entry_file.delete(0, tk.END)  # Use entry_file here
+        entry_file.insert(0, FC_File_Name)
 button_browse = tk.Button(file_fc_frame, text="Browse", font=("Arial", 10), command=Browse_FC_File)
 button_browse.pack(side=tk.RIGHT, padx=5)
-
-button_start = tk.Button(function_check_frame, text="Start Function Check", font=("Arial", 10), command=FC.start_processing)
+def start_processing_UI():
+    # Get the file name from the entry field
+    FC_File_Name = entry_file.get()
+    FC.start_processing(FC_File_Name)
+button_start = tk.Button(function_check_frame, text="Start Function Check", font=("Arial", 10), command=start_processing_UI)
 button_start.pack(pady=5)
 #########################################################################################################################################
 # Receiver Section

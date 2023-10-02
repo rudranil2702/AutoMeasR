@@ -4,11 +4,12 @@
 #import pyvisa as pv
 import time
 #import pandas as pd
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import numpy as np
 import Antenna_Controller as AnCt
 import Receiver as Rxr
 import File_Data_and_Graphs as FDG
+import threading
 
 # Send command to the device
 def Send_Cmd(device, command):
@@ -21,45 +22,6 @@ def Read_Response(device):
 # Perform Height Scan with steps of 0.25 meters and store peak values in a dictionary
 Sim_Flag = False  # Set to True if running in simulation mode
 Verbose = False  # Set to True for verbose output
-# def Ht_Scan_With_Peak(AC, Rx, Freq):
-#     peak_ht_dict = {}
-#     p = 0
-#     Str_Rec = ""
-#     if Sim_Flag:
-#         if Verbose:
-#             print("Tower scan height in progress... (Simulation)")
-#         AnCt.Wait_For_Stop(AC)
-#         return peak_ht_dict
-#     Send_Cmd(AC, "LD TMPM1 DV")
-#     Send_Cmd(AC, "CP")
-#     Str_Rec = Read_Response(AC)
-#     p = float(Str_Rec)
-#     if p < 250:
-#         for height in np.arange(100, 425, 25):
-#             Send_Cmd(AC, f"LD {height:.2f} CM NP")
-#             Send_Cmd(AC, "GO")
-#             AnCt.Wait_For_Stop(AC)
-#             # Read peak value from the receiver
-#             Rxr.Set_Freq(Freq, Rx)
-#             Pk_Value = Rxr.Get_Quasi_Peaks(Rx)
-#             # Store the peak value and respective height in the dictionary
-#             peak_ht_dict[height] = Pk_Value
-#             # Initialize the traces in the receiver
-#             Rxr.Initialize_Traces(Rx)
-#         return peak_ht_dict
-#     else:
-#         for height in np.arange(400, 75, -25):
-#             Send_Cmd(AC, f"LD {height:.2f} CM NP")
-#             Send_Cmd(AC, "GO")
-#             AnCt.Wait_For_Stop(AC)
-#             # Read peak value from the receiver
-#             Rxr.Set_Freq(Freq, Rx)
-#             Pk_Value = Rxr.Get_Quasi_Peaks(Rx)
-#             # Store the peak value and respective height in the dictionary
-#             peak_ht_dict[height] = Pk_Value
-#             # Initialize the traces in the receiver
-#             Rxr.Initialize_Traces(Rx)
-#         return peak_ht_dict
 
 def query_position_AM(AC):
     current_position = ""
@@ -121,50 +83,9 @@ def find_max_ht_peak(data_dict_ht):
             max_peak_height = height
     return max_peak_value, max_peak_height
 
-# Perform Angle Scan with steps of 5 degrees and store peak values in a dictionary
-# def Angle_Scan_With_Peak(AC, Rx, Freq):
-#     peak_ang_dict = {}
-#     p = 0
-#     Str_Rec = ""
-#     if Sim_Flag:
-#         if Verbose:
-#             print("Angle scan in progress... (Simulation)")
-#         AnCt.Wait_For_Stop(AC)
-#         return peak_ang_dict
-#     Send_Cmd(AC, "LD DS1 DV")
-#     Send_Cmd(AC, "CP")
-#     Str_Rec = Read_Response(AC)
-#     p = float(Str_Rec)
-#     if p < 1:
-#         for angle in range(0, 361, 5):
-#             # Move to the target angle in steps of 5 degrees
-#             Send_Cmd(AC, f"LD {angle} DG NP GO")
-#             AnCt.Wait_For_Stop(AC)
-#             # Read peak value from the receiver
-#             Rxr.Set_Freq(Freq, Rx)
-#             Pk_Value = Rxr.Get_Quasi_Peaks(Rx)
-#             # Store the peak value and respective angle in the dictionary
-#             peak_ang_dict[angle] = Pk_Value
-#             # Initialize the traces in the receiver
-#             Rxr.Initialize_Traces(Rx)
-#         return peak_ang_dict
-#     else:
-#         for angle in range(360, -1, -5):
-#             # Move to the target angle in steps of 5 degrees
-#             Send_Cmd(AC, f"LD {angle} DG NP GO")
-#             AnCt.Wait_For_Stop(AC)
-#             # Read peak value from the receiver
-#             Rxr.Set_Freq(Freq, Rx)
-#             Pk_Value = Rxr.Get_Quasi_Peaks(Rx)
-#             # Store the peak value and respective angle in the dictionary
-#             peak_ang_dict[angle] = Pk_Value
-#             # Initialize the traces in the receiver
-#             Rxr.Initialize_Traces(Rx)
-#         return peak_ang_dict
-
 def query_position_TD(AC):
     current_position = ""
-    Send_Cmd(AC, "LD DS1 DV")
+    Send_Cmd(AC, "LD DT1 DV")
     Send_Cmd(AC, "CP")
     response = Read_Response(AC)
     current_position = float(response)
@@ -180,7 +101,7 @@ def Angle_Scan_With_Peak(AC, Rx, Freq):
     # Rx = Initialize_Rx(rx_addr)
     Rxr.Set_Freq(Freq, Rx)
     #Rxr.Set_Quasi_Peaks(Rx)
-    Send_Cmd(AC, "LD DS1 DV")
+    Send_Cmd(AC, "LD DT1 DV")
     Send_Cmd(AC, "CP")
     Str_Rec = Read_Response(AC)
     p = float(Str_Rec)
@@ -192,7 +113,7 @@ def Angle_Scan_With_Peak(AC, Rx, Freq):
             peak_value = Rxr.Get_Quasi_Peaks(Rx)
             # Display data in the text box
             data_dict_ang[current_position] = peak_value
-            if current_position >= 359.7:
+            if current_position >= 359.4:
                 break  # Exit the loop when the antenna reaches the target height
             #Rxr.Initialize_Traces(Rx)
             time.sleep(0.5)
@@ -205,7 +126,7 @@ def Angle_Scan_With_Peak(AC, Rx, Freq):
             peak_value = Rxr.Get_Quasi_Peaks(Rx)
             # Display data in the text box
             data_dict_ang[current_position] = peak_value
-            if current_position <= 0.3:
+            if current_position <= 0.6:
                 break  # Exit the loop when the antenna reaches the target height
             #Rxr.Initialize_Traces(Rx)
             time.sleep(0.5)
@@ -240,11 +161,13 @@ def Auto_Measure(file_name):
     for freq in freqs:
         # Set the frequency on the Receiver
         #Rxr.Set_Freq(freq, Rx)
-
+        AnCt.Reset_Height_After_Measurement(AC)
+        AnCt.Wait_For_Stop(AC)
         # Perform Height Scan
         peak_ht_dict = Ht_Scan_With_Peak(AC, Rx, freq)
         max_ht_peak, max_ht_height = find_max_ht_peak(peak_ht_dict)
         FDG.write_ht_dict_to_excel(peak_ht_dict, freq, f'peak_ht_data_{freq:.2f}MHz.xlsx')
+        #FDG.plot_height_vs_peak_real_time(peak_ht_dict, freq)
         
         # Bring the antenna to the height of the maximum peak
         Send_Cmd(AC, "LD TMPM1 DV")
@@ -257,6 +180,14 @@ def Auto_Measure(file_name):
         max_ang_peak, max_ang_angle = find_max_ang_peak(peak_ang_dict)
         FDG.write_ang_dict_to_excel(peak_ang_dict, freq, f'peak_ang_data_{freq:.2f}MHz.xlsx')
         
+        # Send_Cmd(AC, "LD DS1 DV")
+        # Send_Cmd(AC, "LD {max_ang_angle:.2f} DG NP GO")
+        # AnCt.Wait_For_Stop(AC)
+        
+        # peak_ht_dict = Ht_Scan_With_Peak(AC, Rx, freq)
+        # max_ht_peak, max_ht_height = find_max_ht_peak(peak_ht_dict)
+        # FDG.write_ht_dict_to_excel(peak_ht_dict, freq, f'peak_ht_data_{freq:.2f}MHz.xlsx')
+        #FDG.plot_height_vs_peak_real_time(peak_ht_dict, freq)
         # Store data for writing to Excel
         freq_list.append(freq)
         max_ht_list.append(max_ht_peak)
@@ -272,7 +203,9 @@ def Auto_Measure(file_name):
                 peak_values.append(max_ht_list[i])
             else:
                 peak_values.append(max_ang_list[i])
-        AnCt.Reset_Height_After_Measurement(AC)
+        #AnCt.Reset_Height_After_Measurement(AC)
+        FDG.plot_max_peak_vs_freq(freq_list, peak_values)
+        plt.show()
     # Write data to Excel
     FDG.Write_To_Excel(file_name, freq_list, max_ht_height_list, max_ht_list, max_ang_angle_list, max_ang_list, peak_values)
 
@@ -281,6 +214,6 @@ def Auto_Measure(file_name):
     Rx.close()
 
     # Plot graphs
-    FDG.plot_max_peak_vs_freq(freq_list, peak_values)
+    #FDG.plot_max_peak_vs_freq(freq_list, peak_values)
     #FDG.plot_height_vs_peak(max_ht_list, max_ht_height_list)
     #FDG.plot_angle_vs_peak_polar(max_ang_peak, max_ang_angle_list, max_ang_list)
