@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.animation as animation
 from datetime import datetime
 import queue
-from matplotlib.animation import FuncAnimation
+#from matplotlib.animation import FuncAnimation
 import matplotlib.gridspec as gridspec
 ##############################################################################
 def Send_Cmd(device, command):
@@ -328,6 +328,69 @@ import tkinter.simpledialog as simpledialog
 def show_popup():
     simpledialog.askstring("Confirmation", "Press OK to continue to the next frequency...")
 
+import tkinter.messagebox as messagebox
+
+def confirm_max_point():
+    result = messagebox.askyesno("Confirmation", "Is the selected maximum point appropriate?")
+    return result
+
+prev_red_point = None
+def on_click_height(event, ax, heights_so_far, peaks_so_far):
+    global prev_red_point
+    # Check if the click is on the correct axis
+    if event.inaxes == ax:
+        # Get the coordinates of the click
+        x, y = event.xdata, event.ydata
+        # Find the nearest data point to the click
+        dist = [(x - hx)**2 + (y - hy)**2 for hx, hy in zip(heights_so_far, peaks_so_far)]
+        index = dist.index(min(dist))
+        new_max_height = heights_so_far[index]
+        new_max_peak = peaks_so_far[index]
+        
+        # If there was a previously selected red point, turn it blue
+        if prev_red_point:
+            ax.plot(prev_red_point[0], prev_red_point[1], 'bo')
+        
+        # Plot the selected maximum point in red
+        ax.plot(new_max_height, new_max_peak, 'ro')
+        plt.draw()
+        
+        # Update the previously selected red point
+        prev_red_point = (new_max_height, new_max_peak)
+
+        # Store the selected maximum point
+        global selected_max_height, selected_max_peak
+        selected_max_height, selected_max_peak = new_max_height, new_max_peak
+
+prev_red_point_ang = None
+def on_click_polar(event, ax, peaks_so_far, angles_so_far):
+    global prev_red_point_ang
+    # Check if the click is on the correct axis
+    if event.inaxes == ax:
+        # Get the coordinates of the click
+        r, theta = event.ydata, event.xdata  # r is the radial distance and theta is the angle in radians
+        # Find the nearest data point to the click
+        dist = [(r - pr)**2 + (theta - pt)**2 for pr, pt in zip(peaks_so_far, angles_so_far)]
+        index = dist.index(min(dist))
+        new_max_peak = peaks_so_far[index]
+        new_max_angle = angles_so_far[index]
+        
+        # If there was a previously selected red point, turn it blue
+        if prev_red_point_ang:
+            ax.plot(prev_red_point_ang[1], prev_red_point_ang[0], 'bo')
+        
+        # Plot the selected maximum point in red
+        ax.plot(new_max_angle, new_max_peak, 'ro')
+        plt.draw()
+        
+        # Update the previously selected red point
+        prev_red_point_ang = (new_max_peak, new_max_angle)
+
+        # Store the selected maximum point
+        global selected_max_peak_ang, selected_max_angle
+        selected_max_peak_ang, selected_max_angle = new_max_peak, new_max_angle
+
+
 def Auto_Measure(file_name, window):
     AC_Addr = 'GPIB1::7::INSTR'
     Rx_Addr = 'USB0::0x2A8D::0x0F0B::MY59050129::0::INSTR'
@@ -346,13 +409,21 @@ def Auto_Measure(file_name, window):
     angles_so_far = []
     peaks_ang_so_far = []
 
+    def set_height_and_wait(AC, max_ht_height):
+        Send_Cmd(AC, f"LD {max_ht_height} CM NP")
+        Send_Cmd(AC, "GO")
+        Wait_For_Stop(AC)
+
+    def reset_and_wait(AC):
+        Reset_Height_After_Measurement(AC)
+        Wait_For_Stop(AC)
     # fig1, ax1 = plt.subplots()
     # fig2, ax2 = plt.subplots()
     # fig3 = plt.figure()
     # ax3 = fig3.add_subplot(111, projection='polar')
     
     # Create a figure that will contain all three plots
-    fig = plt.figure(figsize=(15, 10))
+    fig = plt.figure()
     mng = plt.get_current_fig_manager()
     mng.window.state('zoomed')
     #fig.state("zoomed")# Adjust the figure size if needed
@@ -361,8 +432,10 @@ def Auto_Measure(file_name, window):
     # Assign the subplots to the gridspec layout
     #ax1 = fig.add_subplot(gs[0, :])  # Peaks vs Frequency graph (top row, spanning both columns)
     ax2 = fig.add_subplot(gs[:, 0])  # Height vs Peak graph (bottom left)
+    fig.canvas.mpl_connect('button_press_event', lambda event: on_click_height(event, ax2, peaks_so_far, heights_so_far))
     ax3 = fig.add_subplot(gs[:, 1], projection='polar')  # Angle vs Peak polar plot (bottom right)
-    
+    fig.canvas.mpl_connect('button_press_event', lambda event: on_click_polar(event, ax3, peaks_ang_so_far, angles_so_far))
+
     # Initial plot for Peak vs Frequency
     #line1, = ax1.plot([], [], lw=2)
     #ax1.set_title("Peak vs Frequency")
@@ -393,8 +466,11 @@ def Auto_Measure(file_name, window):
         # Clear the axes for height vs. peak and angle vs. peak graphs
         ax2.clear()
         ax3.clear()
-        Reset_Height_After_Measurement(AC)
-        Wait_For_Stop(AC)
+        # Reset_Height_After_Measurement(AC)
+        # Wait_For_Stop(AC)
+        thread2 = threading.Thread(target=reset_and_wait, args=(AC,))
+        thread2.start()
+        thread2.join()
         
         data_queue_ht = queue.Queue()
         ht_thread = threaded_function(Ht_Scan_With_Peak, data_queue_ht, AC, Rx, freq, data_queue_ht)
@@ -428,15 +504,42 @@ def Auto_Measure(file_name, window):
         # After the height scanning loop:
         max_peak = max(peaks_so_far)
         max_height = heights_so_far[peaks_so_far.index(max_peak)]
+        
+        # Store the software-selected maximum point as the previous red point
+        global prev_red_point
+        prev_red_point = (max_peak, max_height)
+        
         ax2.plot(max_peak, max_height, 'ro')  # 'ro' means red color, round points
+        
+        is_max_point_appropriate = confirm_max_point()
+        if not is_max_point_appropriate:
+            messagebox.showinfo("Info", "Please click on the graph to select the appropriate maximum point.")
+            plt.waitforbuttonpress()
+            # Use the selected maximum point for further processing
+            max_peak = selected_max_peak
+            max_height = selected_max_height
+
+        # Use the selected maximum point in the set_height_and_wait function
+        # thread1 = threading.Thread(target=set_height_and_wait, args=(AC, max_height))
+        # thread1.start()
+        # thread1.join() 
         
         q_write_ht = queue.Queue()
         threaded_function(write_ht_dict_to_excel, q_write_ht, peak_ht_dict, freq, f'peak_ht_data_{freq:.2f}MHz.xlsx')
         q_write_ht.get()  # Retrieve any return value or exceptions
         
-        Send_Cmd(AC, f"LD {max_ht_height} CM NP")
-        Send_Cmd(AC, "GO")
-        Wait_For_Stop(AC) 
+        # is_max_point_appropriate = confirm_max_point()
+        # if not is_max_point_appropriate:
+        #     messagebox.showinfo("Info", "Please click on the graph to select the appropriate maximum point.")
+        #     plt.waitforbuttonpress()
+        #     # Use the selected maximum point for further processing
+        #     max_peak = selected_max_peak
+        #     max_height = selected_max_height
+
+        set_height_and_wait(AC, max_height)
+        # thread1 = threading.Thread(target=set_height_and_wait, args=(AC, max_ht_height))
+        # thread1.start()
+        # thread1.join() 
         
         data_queue_ang = queue.Queue()
         ang_thread = threaded_function(Angle_Scan_With_Peak, data_queue_ang, AC, Rx, freq, data_queue_ang)
@@ -468,6 +571,15 @@ def Auto_Measure(file_name, window):
         max_peak_ang = max(peaks_ang_so_far)
         max_angle = angles_so_far[peaks_ang_so_far.index(max_peak_ang)]
         ax3.plot(max_angle, max_peak_ang, 'ro')  # Plot the red point for each frequency
+        
+        is_max_point_appropriate = confirm_max_point()
+        if not is_max_point_appropriate:
+            messagebox.showinfo("Info", "Please click on the polar graph to select the appropriate maximum point.")
+            plt.waitforbuttonpress()
+            # Use the selected maximum point for further processing
+            max_peak_ang = selected_max_peak
+            max_angle = selected_max_height
+
         
         q_write_ang = queue.Queue()
         threaded_function(write_ang_dict_to_excel, q_write_ang, peak_ang_dict, freq, f'peak_ang_data_{freq:.2f}MHz.xlsx')
@@ -826,7 +938,7 @@ def Read_From_Excel(File_Name):
 def start_measurement(window):
     file_name = select_file_entry.get()
     # Read frequencies from the Excel file
-    freqs = Read_From_Excel(file_name)
+    Read_From_Excel(file_name)
     Auto_Measure(file_name, window)
 
 start_button = tk.Button(auto_meas_frame, text="Start Measurement", command=lambda: start_measurement(window))
