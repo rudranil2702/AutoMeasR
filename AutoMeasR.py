@@ -11,6 +11,7 @@ import matplotlib.animation as animation
 from datetime import datetime
 import queue
 from matplotlib.animation import FuncAnimation
+import matplotlib.gridspec as gridspec
 ##############################################################################
 def Send_Cmd(device, command):
     device.write(command)
@@ -84,7 +85,7 @@ def Get_Quasi_Peaks(Rx):
     QPk = max(peaks)
     return QPk
 
-def Ht_Scan_With_Peak(AC, Rx, Freq):
+def Ht_Scan_With_Peak(AC, Rx, Freq, data_queue):
     data_dict_ht = {}
     p = 0
     Str_Rec = ""
@@ -100,6 +101,10 @@ def Ht_Scan_With_Peak(AC, Rx, Freq):
             current_position = Query_Mast_Position(AC)
             peak_value = Get_Quasi_Peaks(Rx)
             data_dict_ht[current_position] = peak_value
+            
+            # Update the graph
+            data_queue.put((current_position, peak_value))
+            
             if current_position >= 389.7:
                 break
             time.sleep(0.5)
@@ -111,10 +116,15 @@ def Ht_Scan_With_Peak(AC, Rx, Freq):
             current_position = Query_Mast_Position(AC)
             peak_value = Get_Quasi_Peaks(Rx)
             data_dict_ht[current_position] = peak_value
+            
+            # Update the graph
+            data_queue.put((current_position, peak_value))
+            
             if current_position <= 100.1:
                 break
             time.sleep(0.5)
         return data_dict_ht
+
 
 def find_max_ht_peak(data_dict_ht):
     if not data_dict_ht:
@@ -135,7 +145,7 @@ def query_position_TD(AC):
     current_position = float(response)
     return current_position
 
-def Angle_Scan_With_Peak(AC, Rx, Freq):
+def Angle_Scan_With_Peak(AC, Rx, Freq, data_queue):
     data_dict_ang = {}
     p = 0
     Str_Rec = ""
@@ -150,8 +160,13 @@ def Angle_Scan_With_Peak(AC, Rx, Freq):
         while True:
             current_position = query_position_TD(AC)
             peak_value = Get_Quasi_Peaks(Rx)
-            # Display data in the text box
             data_dict_ang[current_position] = peak_value
+            
+            # Update the polar graph
+# Instead of updating the GUI, push the data to the queue
+            data_queue.put((current_position, peak_value))
+
+            
             if current_position >= 359.4:
                 break
             time.sleep(0.5)
@@ -162,8 +177,13 @@ def Angle_Scan_With_Peak(AC, Rx, Freq):
         while True:
             current_position = query_position_TD(AC)
             peak_value = Get_Quasi_Peaks(Rx)
-            # Display data in the text box
             data_dict_ang[current_position] = peak_value
+            
+            # Update the polar graph
+# Instead of updating the GUI, push the data to the queue
+            data_queue.put((current_position, peak_value))
+
+            
             if current_position <= 0.6:
                 break
             time.sleep(0.5)
@@ -303,8 +323,12 @@ def threaded_function(func, q, *args, **kwargs):
     return thread
 
 plt.ion()
+import tkinter.simpledialog as simpledialog
 
-def Auto_Measure(file_name):
+def show_popup():
+    simpledialog.askstring("Confirmation", "Press OK to continue to the next frequency...")
+
+def Auto_Measure(file_name, window):
     AC_Addr = 'GPIB1::7::INSTR'
     Rx_Addr = 'USB0::0x2A8D::0x0F0B::MY59050129::0::INSTR'
     Rx = Initialize_Rx(Rx_Addr)
@@ -317,17 +341,33 @@ def Auto_Measure(file_name):
     max_ang_list = []
     max_ht_height_list = []
     max_ang_angle_list = []
+    heights_so_far = []
+    peaks_so_far = []
+    angles_so_far = []
+    peaks_ang_so_far = []
 
-    fig1, ax1 = plt.subplots()
-    fig2, ax2 = plt.subplots()
-    fig3 = plt.figure()
-    ax3 = fig3.add_subplot(111, projection='polar')
-
+    # fig1, ax1 = plt.subplots()
+    # fig2, ax2 = plt.subplots()
+    # fig3 = plt.figure()
+    # ax3 = fig3.add_subplot(111, projection='polar')
+    
+    # Create a figure that will contain all three plots
+    fig = plt.figure(figsize=(15, 10))
+    mng = plt.get_current_fig_manager()
+    mng.window.state('zoomed')
+    #fig.state("zoomed")# Adjust the figure size if needed
+    # Create a gridspec layout with 2 rows and 2 columns
+    gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1])
+    # Assign the subplots to the gridspec layout
+    #ax1 = fig.add_subplot(gs[0, :])  # Peaks vs Frequency graph (top row, spanning both columns)
+    ax2 = fig.add_subplot(gs[:, 0])  # Height vs Peak graph (bottom left)
+    ax3 = fig.add_subplot(gs[:, 1], projection='polar')  # Angle vs Peak polar plot (bottom right)
+    
     # Initial plot for Peak vs Frequency
-    line1, = ax1.plot([], [], lw=2)
-    ax1.set_title("Peak vs Frequency")
-    ax1.set_xlabel("Frequency")
-    ax1.set_ylabel("Peak Value")
+    #line1, = ax1.plot([], [], lw=2)
+    #ax1.set_title("Peak vs Frequency")
+    #ax1.set_xlabel("Frequency")
+    #ax1.set_ylabel("Peak Value")
 
     # Initial plot for Peak vs Height
     line2, = ax2.plot([], [], lw=2)
@@ -341,97 +381,98 @@ def Auto_Measure(file_name):
 
     # Perform scans for each frequency
     for freq in freqs:
-        # Set the frequency on the Receiver
+        # if freq != freqs[-1]:  # Check if it's not the last frequency
+        #     #ax1.clear()
+        #     ax2.clear()
+        #     ax3.clear()
+        heights_so_far = []
+        peaks_so_far = []
+        angles_so_far = []
+        peaks_ang_so_far = []
+        
+        # Clear the axes for height vs. peak and angle vs. peak graphs
+        ax2.clear()
+        ax3.clear()
         Reset_Height_After_Measurement(AC)
         Wait_For_Stop(AC)
         
-        q_ht = queue.Queue()
-        ht_thread = threaded_function(Ht_Scan_With_Peak, q_ht, AC, Rx, freq)
+        data_queue_ht = queue.Queue()
+        ht_thread = threaded_function(Ht_Scan_With_Peak, data_queue_ht, AC, Rx, freq, data_queue_ht)
+        
+        # Continuously poll the queue for new data and update the GUI
+        while ht_thread.is_alive():
+            try:
+                current_position, peak_value = data_queue_ht.get(timeout=0.1)
+                if peak_value > 10:  # Only plot positive values
+                    # Inside the loop where you're plotting for height:
+                    heights_so_far.append(current_position)
+                    peaks_so_far.append(peak_value)
+                    ax2.plot(peaks_so_far, heights_so_far, 'b-')  # 'b-' means blue color, connected line
+                    ax2.plot(peak_value, current_position, 'bo')  # 'bo' means blue color, round points
+                    ax2.set_title(f"Peak vs Height for {freq} MHz")
+                    ax2.set_xlabel("Peak Value (dBuV)")
+                    ax2.set_ylabel("Height (cm)")
+                    plt.pause(0.1)
+            except queue.Empty:
+                pass
+
+
+        window.update_idletasks()  # Update the Tkinter GUI
+        window.update()
+
         ht_thread.join()  # Wait for the thread to finish
-        peak_ht_dict = q_ht.get()  # Get the return value from the queue
+        peak_ht_dict = data_queue_ht.get()  # Get the return value from the queue
         
         max_ht_peak, max_ht_height = find_max_ht_peak(peak_ht_dict)
-        #write_ht_dict_to_excel(peak_ht_dict, freq, f'peak_ht_data_{freq:.2f}MHz.xlsx')
+        #ax2.plot(max_ht_peak, max_ht_height, 'ro')
+        # After the height scanning loop:
+        max_peak = max(peaks_so_far)
+        max_height = heights_so_far[peaks_so_far.index(max_peak)]
+        ax2.plot(max_peak, max_height, 'ro')  # 'ro' means red color, round points
         
         q_write_ht = queue.Queue()
         threaded_function(write_ht_dict_to_excel, q_write_ht, peak_ht_dict, freq, f'peak_ht_data_{freq:.2f}MHz.xlsx')
         q_write_ht.get()  # Retrieve any return value or exceptions
-        #FDG.plot_height_vs_peak_real_time(peak_ht_dict, freq)
         
-        peaks = [p for p in peak_ht_dict.values() if p > 0]
-        heights = [h for h, p in peak_ht_dict.items() if p > 0]
-        line2.set_data(peaks, heights)
-        ax2.set_title(f"Peak vs Height for {freq} MHz")
-        ax2.relim()
-        ax2.autoscale_view()
-        fig2.canvas.draw()
-        fig2.canvas.flush_events()
-        plt.pause(0.1)
-        # ... code where peak_ht_dict is updated
-        #plot_height_vs_peak(peak_ht_dict)
-        # q_plot_ht = queue.Queue()
-        # threaded_function(plot_height_vs_peak, q_plot_ht, peak_ht_dict)
-        # q_plot_ht.get()  # Retrieve any return value or exceptions
-
-        # Bring the antenna to the height of the maximum peak
-        Send_Cmd(AC, "LD TMPM1 DV")
-        Send_Cmd(AC, f"LD {max_ht_height:.2f} CM NP")
+        Send_Cmd(AC, f"LD {max_ht_height} CM NP")
         Send_Cmd(AC, "GO")
-        Wait_For_Stop(AC)
+        Wait_For_Stop(AC) 
+        
+        data_queue_ang = queue.Queue()
+        ang_thread = threaded_function(Angle_Scan_With_Peak, data_queue_ang, AC, Rx, freq, data_queue_ang)
+        # Continuously poll the queue for new data and update the GUI
+        while ang_thread.is_alive():
+            try:
+                current_position, peak_value = data_queue_ang.get(timeout=0.1)
+                if peak_value > 0:  # Only plot positive values
+                    # Inside the loop where you're plotting for angle:
+                    angles_so_far.append(np.radians(current_position))
+                    peaks_ang_so_far.append(peak_value)
+                    ax3.plot(angles_so_far, peaks_ang_so_far, 'b-')
+                    ax3.plot(np.radians(current_position), peak_value, 'bo')
+                    ax3.set_title(f"Angle vs Peak Polar Plot for {freq} MHz")
+                    #ax3.set_rticks(np.arange(20, 70, 5))  # Assuming max_value is the maximum dB value you expect
+                    plt.pause(0.1)
+            except queue.Empty:
+                pass
 
-        q_ang = queue.Queue()
-        ang_thread = threaded_function(Angle_Scan_With_Peak,q_ang, AC, Rx, freq)
+            window.update_idletasks()  # Update the Tkinter GUI
+            window.update()
+
         ang_thread.join()
-        peak_ang_dict = q_ang.get()
+        peak_ang_dict = data_queue_ang.get()
         
         max_ang_peak, max_ang_angle = find_max_ang_peak(peak_ang_dict)
-        #write_ang_dict_to_excel(peak_ang_dict, freq, f'peak_ang_data_{freq:.2f}MHz.xlsx')
+        #ax3.plot(np.radians(max_ang_peak), max_ang_angle, 'ro')
+        # After the angle scanning loop:
+        max_peak_ang = max(peaks_ang_so_far)
+        max_angle = angles_so_far[peaks_ang_so_far.index(max_peak_ang)]
+        ax3.plot(max_angle, max_peak_ang, 'ro')  # Plot the red point for each frequency
         
         q_write_ang = queue.Queue()
         threaded_function(write_ang_dict_to_excel, q_write_ang, peak_ang_dict, freq, f'peak_ang_data_{freq:.2f}MHz.xlsx')
         q_write_ang.get()  # Retrieve any return value or exceptions
-        
-        sorted_items = sorted(peak_ang_dict.items())  # Sort by angle
-        angles = [np.radians(angle) for angle, p in sorted_items if p > 0]
-        peaks_ang = [p for _, p in sorted_items if p > 0]
-        line3.set_data(angles, peaks_ang)
-        ax3.set_title(f"Angle vs Peak Polar Plot for {freq} MHz")
-        ax3.relim()
-        ax3.autoscale_view()
-        fig3.canvas.draw()
-        fig3.canvas.flush_events()
-        plt.pause(0.1)
-        # #positive_peaks = [p for p in peaks_ang if p >= 0]
-        # angles_radians = [np.radians(angle) for angle, p in zip(angles, peaks_ang) if p >= 0]
-        # # Clear the previous plot
-        # ax3.clear()
-        # # Plot peaks at corresponding angles
-        # ax3.plot(angles_radians, positive_peaks, marker='o', linestyle='-')
-        # # Set the polar plot direction clockwise
-        # ax3.set_theta_direction(-1)
-        # # Set 0 degrees at the top of the plot
-        # ax3.set_theta_offset(np.pi / 2.0)
-        # # Set labels for the angles
-        # ax3.set_xticks(np.radians(np.arange(0, 360, 45)))
-        # ax3.set_xticklabels(['0°', '45°', '90°', '135°', '180°', '225°', '270°', '315°'])
 
-
-        
-        #plot_angle_vs_peak_polar(peak_ang_dict)
-        # q_plot_ang = queue.Queue()
-        # threaded_function(plot_angle_vs_peak_polar, q_plot_ang, peak_ang_dict)
-        # q_plot_ang.get()  # Retrieve any return value or exceptions
-        #threaded_function(plot_angle_vs_peak_polar, peak_ang_dict)
-        
-        # Send_Cmd(AC, "LD DS1 DV")
-        # Send_Cmd(AC, "LD {max_ang_angle:.2f} DG NP GO")
-        # AnCt.Wait_For_Stop(AC)
-        
-        # peak_ht_dict = Ht_Scan_With_Peak(AC, Rx, freq)
-        # max_ht_peak, max_ht_height = find_max_ht_peak(peak_ht_dict)
-        # FDG.write_ht_dict_to_excel(peak_ht_dict, freq, f'peak_ht_data_{freq:.2f}MHz.xlsx')
-        #FDG.plot_height_vs_peak_real_time(peak_ht_dict, freq)
-        # Store data for writing to Excel
         freq_list.append(freq)
         max_ht_list.append(max_ht_peak)
         max_ang_list.append(max_ang_peak)
@@ -444,34 +485,26 @@ def Auto_Measure(file_name):
                 peak_values.append(max_ht_list[i])
             else:
                 peak_values.append(max_ang_list[i])
-        #AnCt.Reset_Height_After_Measurement(AC)
-        # ... code where freq_list and peak_values are updated
-        #plot_peak_vs_frequency(freq_list, peak_values)
-        #threaded_function(plot_peak_vs_frequency, freq_list, peak_values)
-        # plot_max_peak_vs_freq(freq_list, peak_values)
-        # plt.show()
-        positive_peak_values = [val for val in peak_values if val > 0]
-        line1.set_data(freq_list, positive_peak_values)
-        ax1.relim()
-        ax1.autoscale_view()
-        fig1.canvas.draw()
-        fig1.canvas.flush_events()
-        plt.pause(0.1)
+        show_popup()
+        
+        #positive_peak_values = [val for val in peak_values if val > 0]
+        #line1.set_data(freq_list, positive_peak_values)
+        #ax1.relim()
+        #ax1.autoscale_view()
+        #fig.canvas.draw()
+        #fig.canvas.flush_events()
+        #plt.pause(0.1)
 
-        # Clear data for the second and third plots
-        line2.set_data([], [])
-        line3.set_data([], [])
-    #threaded_function(Write_To_Excel, file_name, freq_list, max_ht_height_list, max_ht_list, max_ang_angle_list, max_ang_list, peak_values)
     q_write_pf = queue.Queue()
     threaded_function(Write_To_Excel, q_write_pf, file_name, freq_list, max_ht_height_list, max_ht_list, max_ang_angle_list, max_ang_list, peak_values)
     q_write_pf.get()
+    
+    # mng = plt.get_current_fig_manager()
+    # mng.window.state('zoomed')
+    plt.show()
+
     AC.close()
     Rx.close()
-        
-    # Plot graphs
-    #plot_peak_vs_frequency(freq_list, peak_values)
-    #FDG.plot_height_vs_peak(max_ht_list, max_ht_height_list)
-    #FDG.plot_angle_vs_peak_polar(max_ang_peak, max_ang_angle_list, max_ang_list)
 ##############################################################################
 ###################           UI FUNCTIONS           #########################
 ##############################################################################
@@ -479,6 +512,7 @@ window = tk.Tk()
 window.title("Radiated Emissions Measurement Software")
 window.geometry("1280x720")
 window.configure(bg="#333333")
+window.state('zoomed')
 
 # Antenna Controller Section
 ac_frame = tk.Frame(window, bg="#333333")
@@ -789,13 +823,14 @@ def Read_From_Excel(File_Name):
     Freqs = df.iloc[:, 0].tolist()
     return Freqs
 
-def start_measurement():
+def start_measurement(window):
     file_name = select_file_entry.get()
     # Read frequencies from the Excel file
     freqs = Read_From_Excel(file_name)
-    Auto_Measure(file_name)
-start_button = tk.Button(auto_meas_frame, text="Start Measurement", font="bold", width=20, pady=15, command=start_measurement)
-start_button.pack(anchor="center", pady=5)
+    Auto_Measure(file_name, window)
+
+start_button = tk.Button(auto_meas_frame, text="Start Measurement", command=lambda: start_measurement(window))
+start_button.pack()
 ####################################################################################################################################
 # Browse Height Excel File Section
 tk.Label(measurement_frame, text="Plot Graphs", font=("Arial", 16, "bold"), fg="#FFFFFF", bg="#333333").pack(anchor="w")
